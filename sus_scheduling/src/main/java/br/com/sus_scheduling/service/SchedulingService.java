@@ -1,5 +1,6 @@
 package br.com.sus_scheduling.service;
 
+import br.com.sus_scheduling.config.CacheType;
 import br.com.sus_scheduling.controller.dto.scheduling.*;
 import br.com.sus_scheduling.model.Scheduling;
 import br.com.sus_scheduling.queue.consumer.dto.*;
@@ -19,6 +20,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Logger;
 
+import static br.com.sus_scheduling.config.CacheType.PATIENT;
+import static br.com.sus_scheduling.config.CacheType.PROFESSIONAL;
 import static br.com.sus_scheduling.model.SchedulingStatus.*;
 
 @Service
@@ -26,11 +29,13 @@ public class SchedulingService {
 
     private final SchedulingRepository schedulingRepository;
     private final MessageProducer messageProducer;
+    private final CacheService cacheService;
     private final Logger logger = Logger.getLogger(SchedulingService.class.getName());
 
-    public SchedulingService(SchedulingRepository schedulingRepository, MessageProducer messageProducer) {
+    public SchedulingService(SchedulingRepository schedulingRepository, MessageProducer messageProducer, CacheService cacheService) {
         this.schedulingRepository = schedulingRepository;
         this.messageProducer = messageProducer;
+        this.cacheService = cacheService;
     }
 
     @Transactional
@@ -77,15 +82,43 @@ public class SchedulingService {
     }
 
     public List<SchedulingDTO> findAllByPatientId(UUID id, Optional<LocalDate> date) {
-        return date.map(d -> schedulingRepository.findAllByPatientIdAndDate(id, d))
+        String cacheKey = buildCacheKey(PATIENT.name(), id, date.orElse(null));
+
+        @SuppressWarnings("unchecked")
+        List<SchedulingDTO> cachedResult = (List<SchedulingDTO>) cacheService.findByKey(cacheKey);
+
+        if (cachedResult != null) {
+            logger.info("Cache hit para chave: " + cacheKey);
+            return cachedResult;
+        }
+
+        List<SchedulingDTO> result = date.map(d -> schedulingRepository.findAllByPatientIdAndDate(id, d))
                 .orElseGet(() -> schedulingRepository.findAllByPatientId(id))
                 .stream().map(SchedulingDTO::new).toList();
+
+        cacheService.save(cacheKey, result);
+        logger.info("Dados armazenados no cache para chave: " + cacheKey);
+        return result;
     }
 
     public List<SchedulingDTO> findAllByProfessionalId(UUID id, Optional<LocalDate> date) {
-        return date.map(d -> schedulingRepository.findAllByProfessionalIdAndDate(id, d))
+        String cacheKey = buildCacheKey(PROFESSIONAL.name(), id, date.orElse(null));
+
+        @SuppressWarnings("unchecked")
+        List<SchedulingDTO> cachedResult = (List<SchedulingDTO>) cacheService.findByKey(cacheKey);
+
+        if (cachedResult != null) {
+            logger.info("Cache hit para chave: " + cacheKey);
+            return cachedResult;
+        }
+
+        List<SchedulingDTO> result = date.map(d -> schedulingRepository.findAllByProfessionalIdAndDate(id, d))
                 .orElseGet(() -> schedulingRepository.findAllByProfessionalId(id))
                 .stream().map(SchedulingDTO::new).toList();
+
+        cacheService.save(cacheKey, result);
+        logger.info("Dados armazenados no cache para chave: " + cacheKey);
+        return result;
     }
 
     public Scheduling findById(UUID id) {
@@ -155,5 +188,11 @@ public class SchedulingService {
             // TODO: send notification to external service
             logger.info("Upcoming appointment in next 24 hours: " + scheduling);
         });
+    }
+
+    private String buildCacheKey(String type, UUID id, LocalDate date) {
+        return date != null
+                ? type + ":" + id + ":" + date
+                : type + ":" + id;
     }
 }
