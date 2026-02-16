@@ -30,6 +30,15 @@ services:
     networks:
       - sus-scheduling-network
 
+  redis-scheduling:
+    container_name: redis-scheduling
+    image: redis:latest
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - sus-scheduling-network
+
   sus-scheduling-app:
     container_name: java-sus-scheduling
     image: maven:3.8.4-openjdk-17
@@ -49,6 +58,7 @@ services:
     depends_on:
       - sus-scheduling-db
       - mongodb-scheduling
+      - redis-scheduling
 
 networks:
   rabbitmq_go_net:
